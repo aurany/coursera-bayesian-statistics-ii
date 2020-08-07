@@ -1,0 +1,159 @@
+---
+title: "Course Capstone Project"
+subtitle: "Bayesian Statistics: Techniques and models, Coursera"
+abstract: "This is the abstract."
+author: "Rasmus Nyberg"
+date: "August, 2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+<!-- 
+1. Understand the problem
+-------------------------
+Clearly identify your problem and the specific question you wish to answer.
+
+2. Plan and properly collect relevant data
+------------------------------------------
+Justify why the data chosen provide insight to answering your question.
+Describe how the data were collected.
+Describe any challenges relating to data acquisition/preparation (such as missing values, errors, etc.).
+
+3. Explore data
+---------------
+Graphically explore the data using plots that could potentially reveal insight relating to your question.
+
+4. Postulate a model
+--------------------
+Justify why the model you chose is appropriate for the type of data you have.
+Describe how the model is well suited to answer your question.
+Identify how inference for parameters in the model will provide evidence relating to your question.
+Write the full hierarchical specification of the model.
+Justify your choice of prior distributions.
+
+5. Fit the model
+----------------
+Fit the model using JAGS and R.
+
+6. Check the model
+------------------
+Assess MCMC convergence. It is not necessary to include trace plots or other diagnostics in the report. Commenting on the results of your diagnostics is sufficient.
+Check that modeling assumptions are met (e.g., residual analyses, predictive performance, etc.).
+
+7. Iterate if necessary
+-----------------------
+Decide if your model is adequate. Postulate and fit at least one alternative model and assess which is best for answering your question. If neither is adequate, report that and move on.
+
+8. Use the model
+----------------
+Provide relevant posterior summaries.
+Interpret the model results in the context of the problem.
+Use the results to reach a conclusion.
+Acknowledge shortcomings of the model or caveats for your results.
+
+-->
+
+```{r setup, include=FALSE}
+library(knitr)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+dat = read.csv(file="UCI_Credit_Card.csv", header=TRUE)
+head(dat)
+
+colnames(dat)[colnames(dat) == "default.payment.next.month"] = "DEFAULT"
+
+dat$MAX_PAY_HIST <- pmax(dat$PAY_0, dat$PAY_2, dat$PAY_3, dat$PAY_4, dat$PAY_5, dat$PAY_6)
+dat$D_EDU <- as.numeric(dat$EDUCATION <= 2)
+dat$D_MAR <- as.numeric(dat$MARRIAGE <= 1)
+dat$LIMIT <- dat$LIMIT_BAL
+
+# "MAX_PAY_HIST", "AVG_BILL_AMT"
+keep_columns <- c("ID", "LIMIT", "AGE", "SEX", "D_MAR", "D_EDU", "MAX_PAY_HIST", "DEFAULT") 
+dat <- dat[keep_columns]
+head(dat)
+```
+
+## Introduction
+This is the introduction.
+
+## Data
+The dataset contains information on default payments, demographic factors, credit data, history of payment, and bill statements of credit card clients in Taiwan from April 2005 to September 2005. Data was downloaded from Kaggle ^[https://www.kaggle.com/uciml/default-of-credit-card-clients-dataset]. This project is supposed to take about 10 hours, therefore some modifications was done to the original data before any analysis was done. This might be a bad choice if one were to build the best predictive model.
+
+  1) Payment history variables replaced with max MAX_PAY_HIST (max of PAY_0 - PAY_6 > 0)
+  2) Variable EDUCATION replace by dummy D_EDU (1 if Graduate school or university, 0 otherwisae)
+  3) Variable MARRIAGE replace by dummy D_MAR (1 if merried, 0 otherwisae)
+  4) Bill statement variables (PAY_AMT1 - PAY_AMT6) were dropped
+  5) Variable*default.payment.next.month renamed to DEFAULT
+  6) Variable LIMIT_BAL renamed to DEFAULT
+
+
+\fontsize{12}{22}
+```{r echo=FALSE}
+knitr::kable(head(dat), format="markdown", caption = "Table 1: Modified dataset")
+```
+Table: Modified dataset
+
+Summary statistics are shown below. We can see that there are 30k observations of which 22% have defaulted during the next month. The default rate is surprisingly high.
+
+
+```{r echo=FALSE}
+knitr::kable(summary(dat[colnames(dat) %in% c('ID', 'DEFAULT')]), format="markdown")
+```
+Table: Summary statistics
+
+Correlation matrix is shown below. We can see that the strongest correlation with DEFAULT is MAX_PAY_HIST which is expected because defaulted customers often have a history of late payments. LIMIT_BAL have a negative correlation meaning that the probability of DEFAULT decreases with higher limit balance. This could also make sense beacuse higher limits generally would require more in terms of the customers payment history, salary etc. SEX also have a negative correlation meaning that the probabilty of DEFAULT decreases if the customer is a women. The same is true for MARRIAGE meaning that
+
+```{r echo=FALSE}
+corr_matrix = cor(dat[colnames(dat) != 'ID'], method="spearman") 
+corr_matrix = round(corr_matrix, 3)
+  
+knitr::kable(corr_matrix, format="markdown")
+```
+Table: Spearman correlation matrix
+
+
+## Model
+This is the model.
+
+## Results
+This is the results.
+
+## Conclusions
+This is the conslusions.
+
+\newpage
+
+## Original dataset
+```{r echo=FALSE}
+columns = read.table(file="columns.txt", header = TRUE, sep = ":")
+knitr::kable(columns, "markdown")
+```
+
+
+
+
+
+
+
+<!-- ## R Markdown -->
+
+<!-- This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>. -->
+
+<!-- When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this: -->
+
+<!-- ```{r cars} -->
+<!-- summary(cars) -->
+<!-- ``` -->
+
+
+<!-- ## Including Plots -->
+
+<!-- You can also embed plots, for example: -->
+
+<!-- ```{r pressure, echo=FALSE} -->
+<!-- plot(pressure) -->
+<!-- ``` -->
+
+<!-- Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot. -->

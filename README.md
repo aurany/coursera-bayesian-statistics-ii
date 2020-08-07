@@ -1,2 +1,2 @@
-# coursera-bayesian-statistics-ii
-Bayesian Statistics: Techniques and Models
+# Bayesian Statistics: Techniques and Models
+Coursera course by University of California Santa Cruz
