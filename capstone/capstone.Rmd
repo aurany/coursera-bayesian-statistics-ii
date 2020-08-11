@@ -80,16 +80,16 @@ head(dat)
 The goal of this project is to analyze credit risk and correlation between credit default and customer specfic information such as age and marital status. A bayesian logistic regression model will be estimated and be used to answer two questions.
 
   1) What performace can we get in terms of ROC AUC
-  2) Probability of default, male vs female
+  2) Does a women have a lower probability of default compared to a man given some input
 
 ## Data
 The dataset contains information on default payments, demographic factors, credit data, history of payment, and bill statements of credit card clients in Taiwan from April 2005 to September 2005. Data was downloaded from Kaggle ^[https://www.kaggle.com/uciml/default-of-credit-card-clients-dataset]. This project is supposed to take about 10 hours, therefore some modifications and simplifications was done to the original data before any analysis was done. These actions might not be appropriate if the goal is to estimate the best predictive model.
 
   1) Payment history variables replaced with max MAX_PAY_HIST (max of PAY_0 - PAY_6 > 0)
-  2) Variable EDUCATION replace by dummy D_EDU (1 if Graduate school or university, 0 otherwisae)
-  3) Variable MARRIAGE replace by dummy D_MAR (1 if merried, 0 otherwisae)
+  2) Variable EDUCATION replace by dummy D_EDU (1 if Graduate school or university, 0 otherwise)
+  3) Variable MARRIAGE replace by dummy D_MAR (1 if merried, 0 otherwise)
   4) Bill statement variables (PAY_AMT1 - PAY_AMT6) were dropped
-  5) Variable*default.payment.next.month renamed to DEFAULTsurrounds
+  5) Variable default.payment.next.month renamed to DEFAULT
 
 
 ```{r echo=FALSE}
@@ -136,14 +136,14 @@ colnames(dat)[1:5] = varnames
 
 ```{r include=FALSE}
 n.burn.iter = 10000
-n.iter = 10000
+n.iter = 100000
 n.chains = 3
 ```
 
 ## Model
-The dependent variable is binary and therefore we will fit a logistic regression model using log likelihood. The configuration setup include normal priors on the coefficients (mean 0 and variance 100), `r as.integer(n.burn.iter)` burn-in iterations and `r as.integer(n.iter)` total iterations for the `r as.integer(n.chains)` chains.
+The dependent variable is binary and therefore we will fit a logistic regression model using log likelihood. The configuration setup includes normal priors on the coefficients (mean 0 and variance 100), `r as.integer(n.burn.iter)` burn-in iterations and `r as.integer(n.iter)` total iterations for the `r as.integer(n.chains)` chains.
 
-From the modeling diagnostics (see Appendix \@ref(fig:appendix-b)-\@ref(tab:appendix-d)) we can observe autocorrelation and that all parameters have not converged. This indicates that we might have to run the model more iterations and change the specification.
+From the modeling diagnostics (see Appendix A-C) we can observe autocorrelation and that all parameters have not converged. This indicates that we might have to run the model for more iterations and, eventually, change the model specification.
 
 ```{r include=FALSE}
 
@@ -179,16 +179,6 @@ knitr::kable(mod_sum$statistics, format="markdown")
 ```
 Table: Coefficients (means), bayesian model
 
-
-```{r echo=FALSE}
-# new_dat = dat[!colnames(dat) %in% c("ID", "DEFAULT")]
-# mod_pred = predict(mod_glm, newdata=new_dat, type = c("response"))
-# 
-# myroc <- roc(dat$DEFAULT, mod_pred)
-# knitr::kable(auc(myroc), format="markdown")
-```
-<!-- Table: ROC AUC -->
-
 A standard logistic model is estimated as a baseline for comparison and quality check. The coefficients are very close to what we have observed from the bayesian model.
 
 ```{r echo=FALSE}
@@ -199,16 +189,19 @@ knitr::kable(mod2_sum$coefficients, format="markdown")
 Table: Coefficients baseline model
 
 ## Results
-The performance of the model in terms of ROC AUC is acceptable. It should be possible to improve the performance by doing o more serious data analysis, better variable transformations and removing inappropriate variables nad/or variables that dows not make sense.
+The performance of the model in terms of ROC AUC is acceptable. It should be possible to improve the performance by doing o more serious data analysis, better variable transformations and removing inappropriate variables.
 
-```{r echo=FALSE}
+```{r include=FALSE}
+params = colMeans(mod_csim)
 new_dat = before_aggregation[varnames]
 X = as.matrix(cbind(new_dat, 1))
 log_yhat = X %*% params
 yhat = 1/(1+exp(-log_yhat))
 
 roc <- roc(before_aggregation$DEFAULT, as.numeric(yhat))
+```
 
+```{r echo=FALSE}
 knitr::kable(roc$auc, format="markdown")
 ```
 Table: ROC AUC
@@ -224,9 +217,6 @@ X_female = c(40, 2, 1, 1, 0, 1)
 log_yhat_female =  mod_csim %*% X_female
 yhat_female = 1/(1+exp(-log_yhat_female))
 
-head(yhat_male)
-head(yhat_female)
-
 percent = mean(yhat_female < yhat_male)
 
 knitr::kable(percent, format="markdown")
@@ -234,28 +224,21 @@ knitr::kable(percent, format="markdown")
 Table: Probability
 
 ## Conclusions
-It is possible to estimate a relatively good predictive model that can be used for inference. At the same time it's important to understand that the model in this analysis need to be updated based on a more serious data analysis. Conclusions should be drawn with some caution. The analysis has been done with a limited time frame.
+It is possible to estimate a relatively good predictive model that can be used for inference. At the same time it's important to understand that the model in this analysis need to be improved based on a more serious data analysis and that the dataset might not represent a random credit customer. The analysis has been done with a limited time frame and conclusions should be drawn with a lot of caution.
 
-## Appendix A: Original dataset
-```{r appendix-a echo=FALSE}
-columns = read.table(file="columns.txt", header = TRUE, sep = ":")
-knitr::kable(columns, format="markdown")
-```
-Table: Original dataset columns
-
-## Appendix B: Trace plots
-```{r appendix-b echo=FALSE}
+## Appendix A: Trace plots
+```{r echo=FALSE}
 plot(mod_sim)
 ```
 
-## Appendix C: Autocorrelation plots
+## Appendix B: Autocorrelation plots
 ```{r echo=FALSE}
 autocorr.plot(mod_sim)
 ```
 
 \newpage
-## Appendix D: Tables
-```{r appendix-d echo=FALSE}
+## Appendix C: Tables
+```{r appendix-d, echo=FALSE}
 raftery = raftery.diag(mod_sim)
 
 raftery1 = raftery[[1]]$resmatrix
@@ -289,3 +272,11 @@ Table: Gelman And Rubin's Convergence Diagnostic
 knitr::kable(effectiveSize(mod_sim), format="markdown")
 ```
 Table: Effective Sample Size
+
+\newpage
+## Appendix D: Original dataset
+```{r appendix-a, echo=FALSE}
+columns = read.table(file="columns.txt", header = TRUE, sep = ":")
+knitr::kable(columns, format="markdown")
+```
+Table: Original dataset columns
