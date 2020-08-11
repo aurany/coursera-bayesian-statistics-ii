@@ -1,7 +1,6 @@
 ---
-title: "Course Capstone Project"
+title: "Capstone Project"
 subtitle: "Bayesian Statistics: Techniques and models, Coursera"
-abstract: "This is the abstract."
 author: "Rasmus Nyberg"
 date: "August, 2020"
 output:
@@ -55,7 +54,9 @@ Acknowledge shortcomings of the model or caveats for your results.
 -->
 
 ```{r setup, include=FALSE}
-library(knitr)
+library("knitr")
+library("pROC")
+library("rjags")
 
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -76,26 +77,27 @@ head(dat)
 ```
 
 ## Introduction
-This is the introduction.
+The goal of this project is to analyze credit risk and correlation between credit default and customer specfic information such as age and marital status. A bayesian logistic regression model will be estimated and be used to answer two questions.
+
+  1) What performace can we get in terms of ROC AUC
+  2) Probability of default, male vs female
 
 ## Data
-The dataset contains information on default payments, demographic factors, credit data, history of payment, and bill statements of credit card clients in Taiwan from April 2005 to September 2005. Data was downloaded from Kaggle ^[https://www.kaggle.com/uciml/default-of-credit-card-clients-dataset]. This project is supposed to take about 10 hours, therefore some modifications was done to the original data before any analysis was done. This might be a bad choice if one were to build the best predictive model.
+The dataset contains information on default payments, demographic factors, credit data, history of payment, and bill statements of credit card clients in Taiwan from April 2005 to September 2005. Data was downloaded from Kaggle ^[https://www.kaggle.com/uciml/default-of-credit-card-clients-dataset]. This project is supposed to take about 10 hours, therefore some modifications and simplifications was done to the original data before any analysis was done. These actions might not be appropriate if the goal is to estimate the best predictive model.
 
   1) Payment history variables replaced with max MAX_PAY_HIST (max of PAY_0 - PAY_6 > 0)
   2) Variable EDUCATION replace by dummy D_EDU (1 if Graduate school or university, 0 otherwisae)
   3) Variable MARRIAGE replace by dummy D_MAR (1 if merried, 0 otherwisae)
   4) Bill statement variables (PAY_AMT1 - PAY_AMT6) were dropped
-  5) Variable*default.payment.next.month renamed to DEFAULT
-  6) Variable LIMIT_BAL renamed to DEFAULT
+  5) Variable*default.payment.next.month renamed to DEFAULTsurrounds
 
 
-\fontsize{12}{22}
 ```{r echo=FALSE}
-knitr::kable(head(dat), format="markdown", caption = "Table 1: Modified dataset")
+knitr::kable(head(dat), format="markdown")
 ```
 Table: Modified dataset
 
-Summary statistics are shown below. We can see that there are 30k observations of which 22% have defaulted during the next month. The default rate is surprisingly high.
+Summary statistics are shown below. We can see that there are 30k observations of which 22% have defaulted during the next month. The default rate, meaning that more than 1/5 will default during the next month, is surprisingly high.
 
 
 ```{r echo=FALSE}
@@ -103,7 +105,7 @@ knitr::kable(summary(dat[colnames(dat) %in% c('ID', 'DEFAULT')]), format="markdo
 ```
 Table: Summary statistics
 
-Correlation matrix is shown below. We can see that the strongest correlation with DEFAULT is MAX_PAY_HIST which is expected because defaulted customers often have a history of late payments. LIMIT_BAL have a negative correlation meaning that the probability of DEFAULT decreases with higher limit balance. This could also make sense beacuse higher limits generally would require more in terms of the customers payment history, salary etc. SEX also have a negative correlation meaning that the probabilty of DEFAULT decreases if the customer is a women. The same is true for MARRIAGE meaning that
+Correlation matrix is shown below. We can see that the strongest correlation with DEFAULT is MAX_PAY_HIST which is expected because defaulted customers tend to have a history of late payments before the default event occurs. LIMIT have a negative correlation meaning that the probability of default decreases with higher limits. This could also make sense beacuse higher limits generally require more in terms of the customers payment history, salary etc. SEX also have a negative correlation meaning that the probabilty of DEFAULT decreases if the customer is a women. AGE and D_MAR have a small positive correlation indicating that an old or merried customer is associated with higher probability of default which is surprising. D_EDU have a negative correlation indicating that customers with a good education have a lower probabilty of default.
 
 ```{r echo=FALSE}
 corr_matrix = cor(dat[colnames(dat) != 'ID'], method="spearman") 
@@ -113,47 +115,177 @@ knitr::kable(corr_matrix, format="markdown")
 ```
 Table: Spearman correlation matrix
 
+To speed up the modelling process the data was aggregated by all independent variables. Also variable LIMIT was dropped and AGE was rounded to nearest tenth. These actions might be inappropriate if the goal is to estimate the best predictive model. Other considerations might be to try some other transformations of the variables, for example grouping of the variables MAX_PAY_HIST and AGE.
 
-## Model
-This is the model.
+```{r include=FALSE}
 
-## Results
-This is the results.
+before_aggregation = dat
 
-## Conclusions
-This is the conslusions.
+# Dataprep
+dat$AGE = round(dat$AGE, -1) 
+nobs = aggregate(dat$DEFAULT, by=list(dat$AGE, dat$SEX, dat$D_MAR, dat$D_EDU, dat$MAX_PAY_HIST), FUN=length)
+ndef = aggregate(dat$DEFAULT, by=list(dat$AGE, dat$SEX, dat$D_MAR, dat$D_EDU, dat$MAX_PAY_HIST), FUN=sum)
 
-\newpage
+colnames(nobs)[colnames(nobs) == "x"] = "NOBS"
+colnames(ndef)[colnames(ndef) == "x"] = "NDEFAULT"
 
-## Original dataset
-```{r echo=FALSE}
-columns = read.table(file="columns.txt", header = TRUE, sep = ":")
-knitr::kable(columns, "markdown")
+dat = merge(nobs, ndef)
+varnames = c("AGE", "SEX", "D_MAR", "D_EDU", "MAX_PAY_HIST")
+colnames(dat)[1:5] = varnames
 ```
 
+```{r include=FALSE}
+n.burn.iter = 10000
+n.iter = 10000
+n.chains = 3
+```
+
+## Model
+The dependent variable is binary and therefore we will fit a logistic regression model using log likelihood. The configuration setup include normal priors on the coefficients (mean 0 and variance 100), `r as.integer(n.burn.iter)` burn-in iterations and `r as.integer(n.iter)` total iterations for the `r as.integer(n.chains)` chains.
+
+From the modeling diagnostics (see Appendix \@ref(fig:appendix-b)-\@ref(tab:appendix-d)) we can observe autocorrelation and that all parameters have not converged. This indicates that we might have to run the model more iterations and change the specification.
+
+```{r include=FALSE}
+
+# Model
+mod_string = " model {
+	for (i in 1:length(NOBS)) {
+		NDEFAULT[i] ~ dbin(phi[i], NOBS[i])
+    logit(phi[i]) = B0 + B[1]*AGE[i] + B[2]*SEX[i] + B[3]*D_MAR[i] + B[4]*D_EDU[i] + B[5]*MAX_PAY_HIST[i]
+	}
+	
+	B0 ~ dnorm(0.0, 1.0/10.0)
+	B[1] ~ dnorm(0.0, 1.0/10.0)
+  B[2] ~ dnorm(0.0, 1.0/10.0)
+  B[3] ~ dnorm(0.0, 1.0/10.0)
+  B[4] ~ dnorm(0.0, 1.0/10.0)
+  B[5] ~ dnorm(0.0, 1.0/10.0)
+
+} "
+
+dat_jags = as.list(dat)
+params = c("B0", "B")
+mod_bay = jags.model(textConnection(mod_string), data=dat_jags, n.chains=n.chains)
+update(mod_bay, n.burn.iter)
+mod_sim = coda.samples(model=mod_bay, variable.names=params, n.iter=n.iter)
+mod_csim = do.call(rbind, mod_sim)
+```
+
+The coefficients from the estimation is shown below. We can see that two variables (AGE and D_EDU) are not statistically significant (Mean +/- 2*SD surrounds 0) and should be removed from the model.
+
+```{r echo=FALSE}
+mod_sum = summary(mod_sim)
+knitr::kable(mod_sum$statistics, format="markdown")
+```
+Table: Coefficients (means), bayesian model
 
 
+```{r echo=FALSE}
+# new_dat = dat[!colnames(dat) %in% c("ID", "DEFAULT")]
+# mod_pred = predict(mod_glm, newdata=new_dat, type = c("response"))
+# 
+# myroc <- roc(dat$DEFAULT, mod_pred)
+# knitr::kable(auc(myroc), format="markdown")
+```
+<!-- Table: ROC AUC -->
 
+A standard logistic model is estimated as a baseline for comparison and quality check. The coefficients are very close to what we have observed from the bayesian model.
 
+```{r echo=FALSE}
+mod2_glm = glm(NDEFAULT/NOBS ~ AGE + SEX + D_MAR + D_EDU + MAX_PAY_HIST, data=dat, weights=NOBS, family="binomial")
+mod2_sum = summary(mod2_glm)
+knitr::kable(mod2_sum$coefficients, format="markdown")
+```
+Table: Coefficients baseline model
 
+## Results
+The performance of the model in terms of ROC AUC is acceptable. It should be possible to improve the performance by doing o more serious data analysis, better variable transformations and removing inappropriate variables nad/or variables that dows not make sense.
 
-<!-- ## R Markdown -->
+```{r echo=FALSE}
+new_dat = before_aggregation[varnames]
+X = as.matrix(cbind(new_dat, 1))
+log_yhat = X %*% params
+yhat = 1/(1+exp(-log_yhat))
 
-<!-- This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>. -->
+roc <- roc(before_aggregation$DEFAULT, as.numeric(yhat))
 
-<!-- When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this: -->
+knitr::kable(roc$auc, format="markdown")
+```
+Table: ROC AUC
 
-<!-- ```{r cars} -->
-<!-- summary(cars) -->
-<!-- ``` -->
+Given the posterior predictive distribution we can estimate the probability that a woman compared to a man have a lower probability of default given some input. Given 40 years old, married, good education and good history of payments - the probability a woman compared to a man have a lower probability of default is almost 100%.
 
+```{r echo=FALSE}
+X_male = c(40, 1, 1, 1, 0, 1)
+log_yhat_male = mod_csim %*% X_male
+yhat_male = 1/(1+exp(-log_yhat_male))
 
-<!-- ## Including Plots -->
+X_female = c(40, 2, 1, 1, 0, 1)
+log_yhat_female =  mod_csim %*% X_female
+yhat_female = 1/(1+exp(-log_yhat_female))
 
-<!-- You can also embed plots, for example: -->
+head(yhat_male)
+head(yhat_female)
 
-<!-- ```{r pressure, echo=FALSE} -->
-<!-- plot(pressure) -->
-<!-- ``` -->
+percent = mean(yhat_female < yhat_male)
 
-<!-- Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot. -->
+knitr::kable(percent, format="markdown")
+```
+Table: Probability
+
+## Conclusions
+It is possible to estimate a relatively good predictive model that can be used for inference. At the same time it's important to understand that the model in this analysis need to be updated based on a more serious data analysis. Conclusions should be drawn with some caution. The analysis has been done with a limited time frame.
+
+## Appendix A: Original dataset
+```{r appendix-a echo=FALSE}
+columns = read.table(file="columns.txt", header = TRUE, sep = ":")
+knitr::kable(columns, format="markdown")
+```
+Table: Original dataset columns
+
+## Appendix B: Trace plots
+```{r appendix-b echo=FALSE}
+plot(mod_sim)
+```
+
+## Appendix C: Autocorrelation plots
+```{r echo=FALSE}
+autocorr.plot(mod_sim)
+```
+
+\newpage
+## Appendix D: Tables
+```{r appendix-d echo=FALSE}
+raftery = raftery.diag(mod_sim)
+
+raftery1 = raftery[[1]]$resmatrix
+knitr::kable(raftery1, format="markdown")
+```
+Table: Raftery And Lewis's Diagnostic, MC 1
+
+```{r echo=FALSE}
+raftery2 = raftery[[2]]$resmatrix
+knitr::kable(raftery2, format="markdown")
+```
+Table: Raftery And Lewis's Diagnostic, MC 2
+
+```{r echo=FALSE}
+raftery3 = raftery[[3]]$resmatrix
+knitr::kable(raftery3, format="markdown")
+```
+Table: Raftery And Lewis's Diagnostic, MC 3
+
+```{r echo=FALSE}
+knitr::kable(autocorr.diag(mod_sim), format="markdown")
+```
+Table: Markov Chain Autocorrelation
+
+```{r echo=FALSE}
+knitr::kable(gelman.diag(mod_sim)$psrf, format="markdown")
+```
+Table: Gelman And Rubin's Convergence Diagnostic
+
+```{r echo=FALSE}
+knitr::kable(effectiveSize(mod_sim), format="markdown")
+```
+Table: Effective Sample Size
